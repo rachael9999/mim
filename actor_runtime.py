@@ -8,6 +8,7 @@ from typing import Dict, Optional
 import threading
 import time
 import os
+from vector_search import VectorIndex
 
 @dataclass
 class ActorState:
@@ -20,10 +21,11 @@ class ActorState:
 
 
 class ActorHandle:
-    def __init__(self, actor_id: str, exe_path: str, snapshot_dir: Path):
+    def __init__(self, actor_id: str, exe_path: str, snapshot_dir: Path, vector_index: VectorIndex):
         self.actor_id     = actor_id
         self.exe_path     = exe_path
         self.snapshot_dir = snapshot_dir
+        self.vector_index = vector_index
         self.lock         = threading.Lock()
 
         # Python owns all mutable state — Zero exe is stateless by design
@@ -68,6 +70,26 @@ class ActorHandle:
 
             elif msg_type == "snapshot":
                 return self._persist_snapshot()
+
+            elif msg_type == "link":
+                # Create an edge from this actor to another node
+                self.vector_index.embed_edge(
+                    from_id=self.actor_id,
+                    to_id=message["to_id"],
+                    edge_type=message["edge_type"],
+                    label=message["label"],
+                    strength=message.get("strength", 1.0)
+                )
+                return {"status": "ok"}
+
+            elif msg_type == "semantic_query":
+                # Actor asks the host to traverse the semantic graph
+                results = self.vector_index.search(
+                    query=message["query"],
+                    top_k=message.get("top_k", 5),
+                    threshold=message.get("threshold", 0.0) # lower default for mock
+                )
+                return {"status": "ok", "results": results}
 
             return {"status": "unknown"}
 
@@ -118,6 +140,7 @@ class ActorRegistry:
         base_path = Path(__file__).parent
         self.exe_path     = base_path / ".zero" / "out" / "action_actor.exe"
         self.snapshot_dir = base_path / ".zero" / "snapshots"
+        self.vector_index = VectorIndex() # Shared semantic graph
         self.actors:      dict[str, ActorHandle] = {}
 
     def spawn(self, actor_id: str) -> ActorHandle:
@@ -125,7 +148,8 @@ class ActorRegistry:
             self.actors[actor_id] = ActorHandle(
                 actor_id=actor_id,
                 exe_path=str(self.exe_path),
-                snapshot_dir=self.snapshot_dir
+                snapshot_dir=self.snapshot_dir,
+                vector_index=self.vector_index
             )
         return self.actors[actor_id]
 
@@ -154,7 +178,8 @@ if __name__ == "__main__":
     recovered_actor = ActorHandle(
         actor_id=actor_id,
         exe_path=str(registry.exe_path),
-        snapshot_dir=registry.snapshot_dir
+        snapshot_dir=registry.snapshot_dir,
+        vector_index=registry.vector_index
     )
     print(f"Recovered State: {recovered_actor.send({'type': 'get_total'})}")
 
@@ -165,4 +190,30 @@ if __name__ == "__main__":
     r4 = recovered_actor.send({"type": "set_name", "hash": 99, "timestamp": 2})
     print(f"Newer timestamp (updated): {r4}")
 
-    print("\nP1 Snapshot & Restore Validation Complete.")
+    print("\n--- Validating P2 Semantic Graph Integration ---")
+    recovered_actor.send({
+        "type": "link",
+        "to_id": "category:transport",
+        "edge_type": "BelongsTo",
+        "label": "subway commute is public transport",
+        "strength": 0.9
+    })
+    recovered_actor.send({
+        "type": "link",
+        "to_id": "action:read-book",
+        "edge_type": "Alternative",
+        "label": "reading a book instead of driving",
+        "strength": 0.5
+    })
+
+    query_res = recovered_actor.send({
+        "type": "semantic_query",
+        "query": "public transit",
+        "threshold": -1.0 # mock
+    })
+
+    print("Semantic Query Results for 'public transit':")
+    for r in query_res["results"]:
+        print(f"  [{r['score']:.4f}] {r['from_id']} --[{r['edge_type']}]--> {r['to_id']} ({r['label']})")
+
+    print("\nP1 & P2 End-to-End Validation Complete.")

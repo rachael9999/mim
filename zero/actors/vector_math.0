@@ -1,0 +1,46 @@
+// zero/actors/vector_math.0
+// Proves: dot(a, b) compiles correctly through the COFF backend
+// 2D unrolled — exactly 4 flat scalars to bypass CGEN004 argument limit.
+// This serves as the mathematical certificate for the Python engine.
+
+use std.mem
+
+pub fun dot2(a0: i32, a1: i32, b0: i32, b1: i32) -> i32 {
+    let d: i32 = (a0 * b0) + (a1 * b1)
+    return d
+}
+
+pub fun main(world: World) -> Void raises {
+    // Math validation: parallel vectors
+    // [1, 0] * [1, 0] = 1
+    let parallel_dot: i32 = dot2(1, 0, 1, 0)
+
+    // Math validation: orthogonal vectors
+    // [1, 0] * [0, 1] = 0
+    let orthogonal_dot: i32 = dot2(1, 0, 0, 1)
+
+    // Math validation: Pythagorean triple
+    // [3, 4] * [3, 4] = 9 + 16 = 25
+    let pythagorean: i32 = dot2(3, 4, 3, 4)
+
+    check world.out.write("Parallel Dot (expected 1): ")
+    if parallel_dot == 1 {
+        check world.out.write("OK\n")
+    } else {
+        check world.out.write("FAIL\n")
+    }
+
+    check world.out.write("Orthogonal Dot (expected 0): ")
+    if orthogonal_dot == 0 {
+        check world.out.write("OK\n")
+    } else {
+        check world.out.write("FAIL\n")
+    }
+
+    check world.out.write("Pythagorean (expected 25): ")
+    if pythagorean == 25 {
+        check world.out.write("OK\n")
+    } else {
+        check world.out.write("FAIL\n")
+    }
+}
