@@ -1,15 +1,20 @@
 # actor_runtime.py
 # P1: Python as the stateful CRDT host with Snapshot/Restore
+# P3: Decentralized Spreading Activation (Query Federation)
+
 import subprocess
 import json
+import uuid
+import math
 from dataclasses import dataclass, field, asdict
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Dict, Optional, List, Tuple, Set
 import threading
 import time
 import os
-from vector_search import VectorIndex
+from vector_search import cosine_similarity, _mock_embedding
 
+# ── P1: Actor State ────────────────────────────────────────────────────────
 @dataclass
 class ActorState:
     """Python owns this. Zero computes transitions on it."""
@@ -19,46 +24,67 @@ class ActorState:
     name_ts:      int = 0
     last_snapshot: float = field(default_factory=time.time)
 
+# ── P3: Query Envelope & Local Edges ───────────────────────────────────────
+@dataclass
+class QueryEnvelope:
+    """
+    Spreading Activation context passed between actors.
+    visited prevents cycles, max_activations limits fan-out.
+    """
+    query_id:               str
+    query_text:             str
+    query_vec:              List[float]
+    max_hops:               int
+    visited:                Set[str]          = field(default_factory=set)
+    origin_id:              str               = ""
+    max_activations_per_hop: int              = 3
+    threshold:              float             = 0.4
 
+
+@dataclass
+class LocalEdge:
+    to_id:      str
+    edge_type:  str
+    label:      str
+    embedding:  List[float]
+    strength:   float = 1.0
+
+
+# ── Actor Handle ───────────────────────────────────────────────────────────
 class ActorHandle:
-    def __init__(self, actor_id: str, exe_path: str, snapshot_dir: Path, vector_index: VectorIndex):
+    def __init__(self, actor_id: str, registry: "ActorRegistry", exe_path: str, snapshot_dir: Path):
         self.actor_id     = actor_id
+        self.registry     = registry
         self.exe_path     = exe_path
         self.snapshot_dir = snapshot_dir
-        self.vector_index = vector_index
         self.lock         = threading.Lock()
 
-        # Python owns all mutable state — Zero exe is stateless by design
+        # P1: Stateful CRDT
         self.state = self._load_snapshot() or ActorState()
+
+        # P3: Local Decentralized Vector Index
+        self.local_edges: Dict[str, LocalEdge] = {}
 
     def send(self, message: dict) -> dict:
         with self.lock:
             msg_type = message.get("type")
 
             if msg_type == "record_carbon":
-                # Call Zero exe as a pure function: current + delta -> next
-                next_total = self._compute_gcounter_merge(
-                    current=self.state.carbon_total,
-                    delta=message["amount"]
-                )
+                next_total = self.state.carbon_total + message["amount"]
                 self.state.carbon_total = next_total
                 self.state.frequency   += 1
-
-                # Auto-snapshot every 10 operations for testing
                 if self.state.frequency % 10 == 0:
                     self._persist_snapshot()
-
                 return {"status": "ok", "total": self.state.carbon_total}
 
             elif msg_type == "set_name":
-                winner = self._compute_lww_merge(
-                    local_val=self.state.name_hash,
-                    local_ts=self.state.name_ts,
-                    remote_val=message["hash"],
-                    remote_ts=message["timestamp"]
-                )
-                self.state.name_hash = winner["val"]
-                self.state.name_ts   = winner["ts"]
+                local_ts = self.state.name_ts
+                remote_ts = message["timestamp"]
+                if remote_ts > local_ts:
+                    self.state.name_hash = message["hash"]
+                    self.state.name_ts = remote_ts
+                elif local_ts == remote_ts:
+                    self.state.name_hash = max(self.state.name_hash, message["hash"])
                 return {"status": "ok", "name_hash": self.state.name_hash}
 
             elif msg_type == "get_total":
@@ -72,148 +98,178 @@ class ActorHandle:
                 return self._persist_snapshot()
 
             elif msg_type == "link":
-                # Create an edge from this actor to another node
-                self.vector_index.embed_edge(
-                    from_id=self.actor_id,
+                # P3: Add edge to LOCAL index only
+                edge_id = f"{self.actor_id}::{message['edge_type']}::{message['to_id']}"
+                label = message["label"]
+                embedding = self.registry.encode(label)
+                self.local_edges[edge_id] = LocalEdge(
                     to_id=message["to_id"],
                     edge_type=message["edge_type"],
-                    label=message["label"],
+                    label=label,
+                    embedding=embedding,
                     strength=message.get("strength", 1.0)
                 )
+                print(f"[{self.actor_id}] +edge '{label}' -> {message['to_id']}")
                 return {"status": "ok"}
 
             elif msg_type == "semantic_query":
-                # Actor asks the host to traverse the semantic graph
-                results = self.vector_index.search(
-                    query=message["query"],
-                    top_k=message.get("top_k", 5),
-                    threshold=message.get("threshold", 0.0) # lower default for mock
-                )
+                # P3: Spreading Activation Query
+                envelope: QueryEnvelope = message["envelope"]
+                results = self._handle_query(envelope)
                 return {"status": "ok", "results": results}
 
             return {"status": "unknown"}
 
-    def _compute_gcounter_merge(self, current: int, delta: int) -> int:
-        """
-        Invoke Zero exe as a pure function for the CRDT computation.
-        Once Zero supports argv, this will pass args and read stdout.
-        For now, the exe validates the logic with hardcoded values —
-        the Python fallback handles the real computation identically.
-        """
-        return current + delta     # GCounter: commutative addition
+    def _handle_query(self, envelope: QueryEnvelope) -> List[dict]:
+        # 1. Cycle Detection
+        if self.actor_id in envelope.visited:
+            return []
+        envelope.visited.add(self.actor_id)
 
-    def _compute_lww_merge(
-        self, local_val: int, local_ts: int,
-        remote_val: int, remote_ts: int
-    ) -> dict:
-        # LWW: higher timestamp wins, deterministic tie-break on value
-        if remote_ts > local_ts:
-            return {"val": remote_val, "ts": remote_ts}
-        elif local_ts > remote_ts:
-            return {"val": local_val, "ts": local_ts}
-        else:
-            # Tie: larger value wins — deterministic, both sides agree
-            winning_val = max(local_val, remote_val)
-            return {"val": winning_val, "ts": local_ts}
+        # 2. Local Scoring against local_edges only
+        local_results = []
+        scored_neighbors: List[Tuple[float, str]] = []
+
+        for edge_id, edge in self.local_edges.items():
+            if not edge.embedding: continue
+
+            score = cosine_similarity(envelope.query_vec, edge.embedding)
+            local_results.append({
+                "edge_id":   edge_id,
+                "from_id":   self.actor_id,
+                "to_id":     edge.to_id,
+                "edge_type": edge.edge_type,
+                "label":     edge.label,
+                "score":     round(score, 4),
+                "strength":  edge.strength,
+                "hop":       envelope.max_hops
+            })
+            if score >= envelope.threshold:
+                scored_neighbors.append((score, edge.to_id))
+
+        # 3. Directed Forwarding
+        forwarded_results = []
+        if envelope.max_hops > 0 and scored_neighbors:
+            scored_neighbors.sort(reverse=True)
+            to_forward = scored_neighbors[:envelope.max_activations_per_hop]
+
+            for score, neighbor_id in to_forward:
+                neighbor = self.registry.get_actor(neighbor_id)
+                if neighbor is None:
+                    continue # Network hook for distributed setup
+
+                # Prevent silent pruning across parallel branches by passing a copy
+                child_envelope = QueryEnvelope(
+                    query_id=envelope.query_id,
+                    query_text=envelope.query_text,
+                    query_vec=envelope.query_vec,
+                    max_hops=envelope.max_hops - 1,
+                    visited=set(envelope.visited), # Independent copy for this branch
+                    origin_id=envelope.origin_id,
+                    max_activations_per_hop=envelope.max_activations_per_hop,
+                    threshold=envelope.threshold
+                )
+
+                print(f"[Spreading] {self.actor_id} --({score:.2f})--> {neighbor_id}")
+                neighbor_res = neighbor.send({"type": "semantic_query", "envelope": child_envelope})
+                if neighbor_res and "results" in neighbor_res:
+                    forwarded_results.extend(neighbor_res["results"])
+
+        # 4. Aggregation and Deduplication
+        all_results = local_results + forwarded_results
+        seen = set()
+        deduped = []
+        for r in all_results:
+            if r["edge_id"] not in seen:
+                seen.add(r["edge_id"])
+                deduped.append(r)
+
+        return deduped
 
     def _persist_snapshot(self) -> dict:
         self.snapshot_dir.mkdir(parents=True, exist_ok=True)
-        snapshot_path = self.snapshot_dir / f"{self.actor_id}.json"
+        snapshot_path = self.snapshot_dir / f"{self.actor_id.replace(':', '_')}.json"
         snapshot = asdict(self.state)
         snapshot_path.write_text(json.dumps(snapshot, indent=2))
         self.state.last_snapshot = time.time()
         return {"status": "snapshot_ok", "path": str(snapshot_path)}
 
     def _load_snapshot(self) -> Optional[ActorState]:
-        snapshot_path = self.snapshot_dir / f"{self.actor_id}.json"
+        snapshot_path = self.snapshot_dir / f"{self.actor_id.replace(':', '_')}.json"
         if snapshot_path.exists():
             data = json.loads(snapshot_path.read_text())
-            return ActorState(**{
-                k: v for k, v in data.items()
-                if k in ActorState.__dataclass_fields__
-            })
+            return ActorState(**{k: v for k, v in data.items() if k in ActorState.__dataclass_fields__})
         return None
 
 
+# ── Registry: Directory & Bootstrap ────────────────────────────────────────
 class ActorRegistry:
     def __init__(self):
         base_path = Path(__file__).parent
         self.exe_path     = base_path / ".zero" / "out" / "action_actor.exe"
         self.snapshot_dir = base_path / ".zero" / "snapshots"
-        self.vector_index = VectorIndex() # Shared semantic graph
-        self.actors:      dict[str, ActorHandle] = {}
+
+        self.actors:          Dict[str, ActorHandle] = {}
+        self.bootstrap_vecs:  Dict[str, List[float]] = {}
+        self._model = None # Mock by default
 
     def spawn(self, actor_id: str) -> ActorHandle:
         if actor_id not in self.actors:
-            self.actors[actor_id] = ActorHandle(
+            handle = ActorHandle(
                 actor_id=actor_id,
+                registry=self,
                 exe_path=str(self.exe_path),
-                snapshot_dir=self.snapshot_dir,
-                vector_index=self.vector_index
+                snapshot_dir=self.snapshot_dir
             )
+            self.actors[actor_id] = handle
+            self.bootstrap_vecs[actor_id] = self.encode(actor_id)
+            print(f"[Registry] spawned '{actor_id}'")
         return self.actors[actor_id]
 
-if __name__ == "__main__":
-    print("Initializing Stateful ActorRegistry (P1)")
-    registry = ActorRegistry()
+    def get_actor(self, actor_id: str) -> Optional[ActorHandle]:
+        return self.actors.get(actor_id)
 
-    actor_id = "action:commute-subway"
-    print(f"\n--- Spawning Actor: {actor_id} ---")
-    subway_actor = registry.spawn(actor_id)
+    def encode(self, text: str) -> List[float]:
+        return _mock_embedding(text, dims=384)
 
-    print("\n--- Sending Initial Messages ---")
-    r1 = subway_actor.send({"type": "record_carbon", "amount": 100})
-    print(f"Record 1: {r1}")
+    def query(self, entry_actor_id: str, query_text: str,
+              max_hops: int = 3, threshold: float = 0.4,
+              max_activations_per_hop: int = 3) -> List[dict]:
 
-    r2 = subway_actor.send({"type": "set_name", "hash": 42, "timestamp": 1})
-    print(f"Set Name 1: {r2}")
+        actor = self.get_actor(entry_actor_id)
+        if not actor: raise KeyError(f"Entry actor '{entry_actor_id}' not found")
 
-    print(f"Current State: {subway_actor.send({'type': 'get_total'})}")
+        envelope = QueryEnvelope(
+            query_id=str(uuid.uuid4())[:8],
+            query_text=query_text,
+            query_vec=self.encode(query_text),
+            max_hops=max_hops,
+            max_activations_per_hop=max_activations_per_hop,
+            threshold=threshold,
+            origin_id=entry_actor_id
+        )
+        res = actor.send({"type": "semantic_query", "envelope": envelope})
+        results = res.get("results", [])
+        results.sort(key=lambda x: x["score"], reverse=True)
+        return results
 
-    print("\n--- Triggering Snapshot ---")
-    snap_res = subway_actor.send({"type": "snapshot"})
-    print(f"Snapshot Result: {snap_res}")
+    def bootstrap_query(self, query_text: str, top_k_entry: int = 2, **kwargs) -> List[dict]:
+        query_vec = self.encode(query_text)
+        scored = [
+            (cosine_similarity(query_vec, vec), aid)
+            for aid, vec in self.bootstrap_vecs.items()
+        ]
+        scored.sort(reverse=True)
+        entry_points = [aid for _, aid in scored[:top_k_entry]]
+        print(f"\n[Bootstrap] Entry points for '{query_text}': {entry_points}")
 
-    print("\n--- Simulating Process Crash / Restart ---")
-    recovered_actor = ActorHandle(
-        actor_id=actor_id,
-        exe_path=str(registry.exe_path),
-        snapshot_dir=registry.snapshot_dir,
-        vector_index=registry.vector_index
-    )
-    print(f"Recovered State: {recovered_actor.send({'type': 'get_total'})}")
+        all_results = []
+        seen = set()
+        for entry_id in entry_points:
+            for r in self.query(entry_id, query_text, **kwargs):
+                if r["edge_id"] not in seen:
+                    seen.add(r["edge_id"])
+                    all_results.append(r)
 
-    print("\n--- Validating CRDT Merge Logic (LWW) ---")
-    r3 = recovered_actor.send({"type": "set_name", "hash": 10, "timestamp": 0})
-    print(f"Older timestamp (ignored): {r3}")
-
-    r4 = recovered_actor.send({"type": "set_name", "hash": 99, "timestamp": 2})
-    print(f"Newer timestamp (updated): {r4}")
-
-    print("\n--- Validating P2 Semantic Graph Integration ---")
-    recovered_actor.send({
-        "type": "link",
-        "to_id": "category:transport",
-        "edge_type": "BelongsTo",
-        "label": "subway commute is public transport",
-        "strength": 0.9
-    })
-    recovered_actor.send({
-        "type": "link",
-        "to_id": "action:read-book",
-        "edge_type": "Alternative",
-        "label": "reading a book instead of driving",
-        "strength": 0.5
-    })
-
-    query_res = recovered_actor.send({
-        "type": "semantic_query",
-        "query": "public transit",
-        "threshold": -1.0 # mock
-    })
-
-    print("Semantic Query Results for 'public transit':")
-    for r in query_res["results"]:
-        print(f"  [{r['score']:.4f}] {r['from_id']} --[{r['edge_type']}]--> {r['to_id']} ({r['label']})")
-
-    print("\nP1 & P2 End-to-End Validation Complete.")
+        all_results.sort(key=lambda x: x["score"], reverse=True)
+        return all_results
