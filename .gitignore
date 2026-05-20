@@ -1,0 +1,5 @@
+.zero/out/
+.zero/snapshots/
+__pycache__/
+*.exe
+*.log
