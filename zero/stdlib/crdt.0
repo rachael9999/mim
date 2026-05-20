@@ -1,0 +1,57 @@
+// zero/stdlib/crdt.0
+// CRDT Primitives for Zero Language (MVP Flat Primitives implementation)
+
+// ============================================================
+// G-Counter: Grow-only Counter
+// Enforced by convention using @crdt:gcounter on u64 fields
+// ============================================================
+
+pub fun gcounter_merge(local: u64, remote: u64) -> u64 {
+    let mut max_val: u64 = local
+    if remote > local {
+        max_val = remote
+    }
+    return max_val
+}
+
+// ============================================================
+// LWW-Register: Last-Write-Wins Register
+// Enforced by convention using pairs of flat fields:
+// - field_val: u64 (or other primitive)
+// - field_ts: u64
+// @crdt:lwwregister
+// ============================================================
+
+pub fun lwwregister_merge_ts(local_ts: u64, remote_ts: u64) -> u64 {
+    if remote_ts > local_ts {
+        return remote_ts
+    }
+    return local_ts
+}
+
+// ============================================================
+// OR-Set: Observed-Remove Set
+// @crdt:orset
+// Note: MVP does not support Map/Set natively yet.
+// We will mock this with arrays or primitive IDs where possible
+// ============================================================
+
+pub fun main() -> Void {
+    // Test the flat CRDT logic
+    let mut carbon_total: u64 = 1500_u64  // @crdt:gcounter
+    let remote_carbon: u64 = 2500_u64
+
+    carbon_total = gcounter_merge(carbon_total, remote_carbon)
+
+    // LWW Register Test
+    let mut name_val_hash: u64 = 1234_u64 // @crdt:lwwregister value (mocked as u64 hash)
+    let mut name_ts: u64 = 100_u64        // @crdt:lwwregister timestamp
+
+    let remote_name_val: u64 = 5678_u64
+    let remote_name_ts: u64 = 105_u64
+
+    if remote_name_ts > name_ts {
+        name_val_hash = remote_name_val
+        name_ts = remote_name_ts
+    }
+}

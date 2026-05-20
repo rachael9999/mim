@@ -1,0 +1,16 @@
+// zero/actors/action_actor.0
+// Native EXE Actor Implementation
+
+use std.mem
+
+pub fun main(world: World) -> Void raises {
+    // Immutable locals only — MVP COFF limitation
+    // Hardcoded simulation to prove the compilation chain works
+    let carbon_total: i32 = 2500
+    let frequency: i32 = 2
+    let name_ts: i32 = 0
+
+    check world.out.write("Actor initialized. Carbon: ")
+    check world.out.write("2500\n")
+    check world.out.write("Frequency: 2\n")
+}
