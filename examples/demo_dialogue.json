@@ -1,0 +1,18 @@
+[
+  {
+    "role": "user",
+    "content": "Hello, I am working on project-x today."
+  },
+  {
+    "role": "assistant",
+    "content": "Got it. Project-x."
+  },
+  {
+    "role": "user",
+    "content": "Remember: I need to buy milk after work."
+  },
+  {
+    "role": "user",
+    "content": "Todo: finish the P8 implementation by tonight."
+  }
+]

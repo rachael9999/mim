@@ -1,0 +1,40 @@
+{
+  "id": "mem_1779349027386",
+  "owner_id": "u1",
+  "content": {
+    "value": "Node A Content",
+    "clock": 0,
+    "node_id": "local"
+  },
+  "memory_type": {
+    "value": "project",
+    "clock": 0,
+    "node_id": "local"
+  },
+  "tags": {
+    "adds": {
+      "tagA": [
+        "init"
+      ],
+      "tagB": [
+        "init"
+      ]
+    },
+    "removes": {}
+  },
+  "status": {
+    "value": "active",
+    "clock": 0,
+    "node_id": "local"
+  },
+  "_meta": {
+    "actor_id": "mem_1779349027386",
+    "revision": 1,
+    "clock": 2,
+    "version_vector": {
+      "local": 2
+    }
+  },
+  "_deleted": true,
+  "delete_certificate": null
+}

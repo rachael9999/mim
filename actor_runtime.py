@@ -204,14 +204,23 @@ class ActorHandle:
 
 # ── Registry: Directory & Bootstrap ────────────────────────────────────────
 class ActorRegistry:
-    def __init__(self):
+    def __init__(self, model_name: str = "all-MiniLM-L6-v2"):
         base_path = Path(__file__).parent
         self.exe_path     = base_path / ".zero" / "out" / "action_actor.exe"
         self.snapshot_dir = base_path / ".zero" / "snapshots"
 
         self.actors:          Dict[str, ActorHandle] = {}
         self.bootstrap_vecs:  Dict[str, List[float]] = {}
-        self._model = None # Mock by default
+
+        # Load SentenceTransformer properly
+        self._model = None
+        try:
+            from sentence_transformers import SentenceTransformer
+            print(f"[Registry] Loading model: {model_name}")
+            self._model = SentenceTransformer(model_name)
+            print(f"[Registry] Model ready — {self._model.get_sentence_embedding_dimension()}-dim embeddings")
+        except ImportError:
+            print("[Registry] sentence-transformers not installed — using mock embeddings")
 
     def spawn(self, actor_id: str) -> ActorHandle:
         if actor_id not in self.actors:
