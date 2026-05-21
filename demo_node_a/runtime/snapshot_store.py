@@ -18,10 +18,3 @@ class SnapshotStore:
             return None
         with open(path, encoding="utf-8") as f:
             return json.load(f)
-
-    def delete(self, id):
-        path = f"{self.dir}/{id}.json"
-        if os.path.exists(path):
-            os.remove(path)
-            return True
-        return False

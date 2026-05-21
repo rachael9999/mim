@@ -1,0 +1,66 @@
+
+<!DOCTYPE html>
+<html>
+<head>
+    <title>MIM Knowledge Graph</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/cytoscape/3.23.0/cytoscape.min.js"></script>
+    <style>
+        #cy { width: 100%; height: 90vh; display: block; background-color: #f9f9f9; }
+        body { font-family: sans-serif; margin: 0; }
+        .header { padding: 10px; background: #333; color: white; text-align: center; }
+    </style>
+</head>
+<body>
+    <div class="header">MIM Knowledge Graph - User: u1</div>
+    <div id="cy"></div>
+    <script>
+        var cy = cytoscape({
+            container: document.getElementById('cy'),
+            elements: {
+                nodes: [{"data": {"id": "climate_node", "label": "climate_node\n(entity)", "content": "Global Climate Change", "type": "entity"}}, {"data": {"id": "dir_4a016119f2", "label": "dir_4a016119f2\n(directory)", "content": "Directory: test_knowledge_base", "type": "directory"}}, {"data": {"id": "emissions_node", "label": "emissions_node\n(entity)", "content": "CO2 Emissions", "type": "entity"}}, {"data": {"id": "ev_node", "label": "ev_node\n(entity)", "content": "Electric Vehicles", "type": "entity"}}, {"data": {"id": "file_01c2b01b42", "label": "file_01c2b01b42\n(file)", "content": "Lithium batteries are key for sustainable transpor", "type": "file"}}, {"data": {"id": "file_4df661d071", "label": "file_4df661d071\n(file)", "content": "New energy policy favors sustainable transport.", "type": "file"}}, {"data": {"id": "tesla_node", "label": "tesla_node\n(entity)", "content": "Tesla Corporation", "type": "entity"}}],
+                edges: [{"data": {"source": "emissions_node", "target": "climate_node", "label": "Influences", "weight": 1.0}}, {"data": {"source": "ev_node", "target": "emissions_node", "label": "Reduces", "weight": 0.9}}, {"data": {"source": "file_01c2b01b42", "target": "dir_4a016119f2", "label": "contained_in", "weight": 1.0}}, {"data": {"source": "file_4df661d071", "target": "dir_4a016119f2", "label": "contained_in", "weight": 1.0}}, {"data": {"source": "tesla_node", "target": "ev_node", "label": "Produces", "weight": 1.0}}]
+            },
+            style: [
+                {
+                    selector: 'node',
+                    style: {
+                        'background-color': '#666',
+                        'label': 'data(label)',
+                        'text-wrap': 'wrap',
+                        'font-size': '10px',
+                        'color': '#333'
+                    }
+                },
+                {
+                    selector: 'node[type="directory"]',
+                    style: { 'background-color': '#f1c40f', 'shape': 'rectangle' }
+                },
+                {
+                    selector: 'node[type="file"]',
+                    style: { 'background-color': '#3498db', 'shape': 'round-rectangle' }
+                },
+                {
+                    selector: 'node[type="entity"]',
+                    style: { 'background-color': '#e74c3c', 'shape': 'ellipse' }
+                },
+                {
+                    selector: 'edge',
+                    style: {
+                        'width': 2,
+                        'line-color': '#ccc',
+                        'target-arrow-color': '#ccc',
+                        'target-arrow-shape': 'triangle',
+                        'curve-style': 'bezier',
+                        'label': 'data(label)',
+                        'font-size': '8px'
+                    }
+                }
+            ],
+            layout: { name: 'cose', animate: true }
+        });
+        cy.on('tap', 'node', function(evt){
+            alert(evt.target.data('content'));
+        });
+    </script>
+</body>
+</html>

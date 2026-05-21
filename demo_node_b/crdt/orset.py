@@ -35,25 +35,4 @@ class ORSet:
                     local_dots.append(dot)
 
     def to_dict(self):
-        # JSON 不支持 tuple 作为 key，如果是 tuple 元素，序列化时需要特殊处理
-        # 这里的 adds 和 removes 的 key 可能是 tuple (links 情况)
-        def serialize_val(v):
-            if isinstance(v, tuple):
-                import json
-                return f"__tuple__:{json.dumps(list(v))}"
-            return v
-
-        return {
-            "adds": {serialize_val(k): v for k, v in self.adds.items()},
-            "removes": {serialize_val(k): v for k, v in self.removes.items()}
-        }
-
-    def from_dict(self, data):
-        def deserialize_val(v):
-            if isinstance(v, str) and v.startswith("__tuple__:"):
-                import json
-                return tuple(json.loads(v[10:]))
-            return v
-
-        self.adds = {deserialize_val(k): v for k, v in data.get("adds", {}).items()}
-        self.removes = {deserialize_val(k): v for k, v in data.get("removes", {}).items()}
+        return {"adds": self.adds, "removes": self.removes}

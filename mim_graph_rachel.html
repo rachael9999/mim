@@ -1,0 +1,66 @@
+
+<!DOCTYPE html>
+<html>
+<head>
+    <title>MIM Knowledge Graph</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/cytoscape/3.23.0/cytoscape.min.js"></script>
+    <style>
+        #cy { width: 100%; height: 90vh; display: block; background-color: #f9f9f9; }
+        body { font-family: sans-serif; margin: 0; }
+        .header { padding: 10px; background: #333; color: white; text-align: center; }
+    </style>
+</head>
+<body>
+    <div class="header">MIM Knowledge Graph - User: rachel</div>
+    <div id="cy"></div>
+    <script>
+        var cy = cytoscape({
+            container: document.getElementById('cy'),
+            elements: {
+                nodes: [{"data": {"id": "mem_ext_1779357689424_0", "label": "mem_ext_1779357689424_0\n(chat_context)", "content": "MIM \u5df2\u7ecf\u901a\u8fc7 MCP \u6210\u529f\u94fe\u63a5\u5230\u4e86 Claude Code\u3002\u76ee\u524d\u6211\u4eec\u6b63\u5728\u8fdb\u884c P11 MIM-G", "type": "chat_context"}}, {"data": {"id": "mem_ext_1779357690456_1", "label": "mem_ext_1779357690456_1\n(chat_context)", "content": "MIM \u5df2\u7ecf\u901a\u8fc7 MCP \u6210\u529f\u94fe\u63a5\u5230\u4e86 Claude Code\u3002\u76ee\u524d\u6211\u4eec\u6b63\u5728\u8fdb\u884c P11 MIM-G", "type": "chat_context"}}, {"data": {"id": "mem_ext_1779357691330_2", "label": "mem_ext_1779357691330_2\n(chat_context)", "content": "MIM \u5df2\u7ecf\u901a\u8fc7 MCP \u6210\u529f\u94fe\u63a5\u5230\u4e86 Claude Code\u3002\u76ee\u524d\u6211\u4eec\u6b63\u5728\u8fdb\u884c P11 MIM-G", "type": "chat_context"}}, {"data": {"id": "mem_ext_1779357692181_3", "label": "mem_ext_1779357692181_3\n(chat_context)", "content": "MIM \u5df2\u7ecf\u901a\u8fc7 MCP \u6210\u529f\u94fe\u63a5\u5230\u4e86 Claude Code\u3002\u76ee\u524d\u6211\u4eec\u6b63\u5728\u8fdb\u884c P11 MIM-G", "type": "chat_context"}}, {"data": {"id": "mem_ext_1779357693044_4", "label": "mem_ext_1779357693044_4\n(chat_context)", "content": "MIM \u5df2\u7ecf\u901a\u8fc7 MCP \u6210\u529f\u94fe\u63a5\u5230\u4e86 Claude Code\u3002\u76ee\u524d\u6211\u4eec\u6b63\u5728\u8fdb\u884c P11 MIM-G", "type": "chat_context"}}, {"data": {"id": "mem_ext_1779358155764_0", "label": "mem_ext_1779358155764_0\n(chat_context)", "content": "\u6d93\u5b2d\u6d47\u6d5c\u54d6S C:\\Users\\rachel\\mim> ollama list NAME      ", "type": "chat_context"}}, {"data": {"id": "mem_ext_1779358332418_0", "label": "mem_ext_1779358332418_0\n(tech)", "content": "gemma4:e2b \u6a21\u578b INTEGRATED_IN MIM", "type": "tech"}}, {"data": {"id": "mem_ext_1779359528603_0", "label": "mem_ext_1779359528603_0\n(fact)", "content": "MIM IMPROVEMENT_GOAL \u667a\u80fd\u5316", "type": "fact"}}, {"data": {"id": "mem_ext_1779359545423_0", "label": "mem_ext_1779359545423_0\n(feature)", "content": "P15 DEVELOPS \u77e5\u8bc6\u53d1\u73b0\u529f\u80fd", "type": "feature"}}, {"data": {"id": "mem_ext_1779359659342_0", "label": "mem_ext_1779359659342_0\n(enhancement)", "content": "P15 knowledge discovery function develops MIM inte", "type": "enhancement"}}, {"data": {"id": "mem_ext_1779359660348_1", "label": "mem_ext_1779359660348_1\n(integration)", "content": "The function integrates the Gemma model", "type": "integration"}}, {"data": {"id": "mem_ext_1779359661142_2", "label": "mem_ext_1779359661142_2\n(Action)", "content": "We optimized the multi-hop Spreading Activation al", "type": "Action"}}, {"data": {"id": "mem_ext_1779359661961_3", "label": "mem_ext_1779359661961_3\n(relationship)", "content": "optimization clarifies reasoning path", "type": "relationship"}}, {"data": {"id": "mem_ext_1779359662804_4", "label": "mem_ext_1779359662804_4\n(Action)", "content": "We registered Peer nodes", "type": "Action"}}, {"data": {"id": "mem_ext_1779359663610_5", "label": "mem_ext_1779359663610_5\n(achievement)", "content": "Real-time synchronization has been achieved None", "type": "achievement"}}],
+                edges: [{"data": {"source": "mem_ext_1779358332418_0", "target": "mem_ext_1779357689424_0", "label": "supports", "weight": 1.0}}]
+            },
+            style: [
+                {
+                    selector: 'node',
+                    style: {
+                        'background-color': '#666',
+                        'label': 'data(label)',
+                        'text-wrap': 'wrap',
+                        'font-size': '10px',
+                        'color': '#333'
+                    }
+                },
+                {
+                    selector: 'node[type="directory"]',
+                    style: { 'background-color': '#f1c40f', 'shape': 'rectangle' }
+                },
+                {
+                    selector: 'node[type="file"]',
+                    style: { 'background-color': '#3498db', 'shape': 'round-rectangle' }
+                },
+                {
+                    selector: 'node[type="entity"]',
+                    style: { 'background-color': '#e74c3c', 'shape': 'ellipse' }
+                },
+                {
+                    selector: 'edge',
+                    style: {
+                        'width': 2,
+                        'line-color': '#ccc',
+                        'target-arrow-color': '#ccc',
+                        'target-arrow-shape': 'triangle',
+                        'curve-style': 'bezier',
+                        'label': 'data(label)',
+                        'font-size': '8px'
+                    }
+                }
+            ],
+            layout: { name: 'cose', animate: true }
+        });
+        cy.on('tap', 'node', function(evt){
+            alert(evt.target.data('content'));
+        });
+    </script>
+</body>
+</html>

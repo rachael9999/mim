@@ -1,5 +1,32 @@
-.zero/out/
-.zero/snapshots/
+# IDEs
+.vscode/
+.idea/
+.claude/
+
+# Python
 __pycache__/
-*.exe
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+.venv/
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Zero & MIM Internal
+.zero/
+mim/snapshots/
+mim/test_knowledge_base/
+demo_node_a/mim/snapshots/
+demo_node_b/mim/snapshots/
+oplogs/
 *.log
+
+# Snapshots & OS
+*.json
+!examples/*.json
+!demo_dialogue.json
+.DS_Store
+Thumbs.db

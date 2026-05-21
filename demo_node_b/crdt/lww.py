@@ -4,10 +4,7 @@ class LWWRegister:
         self.clock = clock
         self.node_id = node_id
 
-    def set(self, value, clock, node_id=None):
-        if node_id is None:
-            from runtime.core import NODE_ID
-            node_id = NODE_ID
+    def set(self, value, clock, node_id="local"):
         # 使用 (lamport, node_id) 二元组作为排序依据，确保确定性
         if (clock, node_id) >= (self.clock, self.node_id):
             self.value = value

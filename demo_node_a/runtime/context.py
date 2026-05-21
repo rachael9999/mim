@@ -1,20 +1,16 @@
-from runtime.clocks import LamportClock, VersionVector
+from runtime.clocks import LamportClock
 
 class ActorContext:
-    def __init__(self, actor_id, node_id="local", lamport=0, revision=0, version_vector=None):
+    def __init__(self, actor_id, node_id="local", lamport=0, revision=0):
         self.actor_id = actor_id
         self.node_id = node_id
         self.clock = LamportClock(lamport, node_id)
         self.revision = revision
-        self.version_vector = VersionVector(version_vector)
 
     def next_clock(self):
-        self.version_vector.increment(self.node_id)
         return self.clock.tick().lamport
 
-    def merge_clock(self, remote_lamport, remote_vv=None):
-        if remote_vv:
-            self.version_vector.merge(remote_vv)
+    def merge_clock(self, remote_lamport):
         return self.clock.merge(remote_lamport).lamport
 
     def next_revision(self):
@@ -24,7 +20,6 @@ class ActorContext:
     def update_from_actor(self, meta):
         self.clock.lamport = max(self.clock.lamport, meta.get("clock", 0))
         self.revision = meta.get("revision", self.revision)
-        self.version_vector.merge(meta.get("version_vector", {}))
 
     def to_dict(self):
         return {

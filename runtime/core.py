@@ -1,13 +1,50 @@
 import os
 import json
+import uuid
 from runtime.actor import MemoryActor, IndexActor
 from runtime.visibility import DeleteCertIndex, DummyScopeGraph, VisibilityResolver
 from runtime.snapshot_store import SnapshotStore
 from runtime.index_snapshot import IndexSnapshotStore
 from runtime.runtime import MimRuntime
-from runtime.embeddings import MockEmbeddingProvider
+from runtime.embeddings import OllamaEmbeddingProvider
+from runtime.llm_extractor import GemmaExtractor
 
 SNAPSHOT_DIR = "mim/snapshots"
+NODE_ID_FILE = os.path.join(SNAPSHOT_DIR, "node_id")
+
+def get_node_id():
+    if not os.path.exists(SNAPSHOT_DIR):
+        os.makedirs(SNAPSHOT_DIR, exist_ok=True)
+    if os.path.exists(NODE_ID_FILE):
+        with open(NODE_ID_FILE, "r") as f:
+            return f.read().strip()
+    new_id = str(uuid.uuid4())[:8]
+    with open(NODE_ID_FILE, "w") as f:
+        f.write(new_id)
+    return new_id
+
+NODE_ID = get_node_id()
+PEERS_FILE = os.path.join(SNAPSHOT_DIR, "peers.json")
+
+def get_peers():
+    if os.path.exists(PEERS_FILE):
+        with open(PEERS_FILE, "r") as f:
+            return json.load(f)
+    return []
+
+def add_peer(url):
+    peers = get_peers()
+    if url not in peers:
+        peers.append(url)
+        with open(PEERS_FILE, "w") as f:
+            json.dump(peers, f)
+    return peers
+# ... (existing imports)
+
+# 替换提取器为更强大的 Gemma 模型
+# 注意：这里使用用户本地已有的 gemma2:2b (对应您列表里的 gemma2:2b，虽然列表里写的是 gemma4:e2b 可能是别名，我先用标准名)
+# 修正：使用用户本地的确切模型名称 gemma4:e2b
+llm_extractor = GemmaExtractor(model="gemma4:e2b")
 CERT_FILE = os.path.join(SNAPSHOT_DIR, "certs.json")
 
 mems = {}        # id -> MemoryActor
@@ -16,7 +53,7 @@ cert_index = DeleteCertIndex()
 scope_graph = DummyScopeGraph()
 store = SnapshotStore(SNAPSHOT_DIR)
 index_store = IndexSnapshotStore(os.path.join(SNAPSHOT_DIR, "index.json"))
-embed_provider = MockEmbeddingProvider()
+embed_provider = OllamaEmbeddingProvider(model="nomic-embed-text")
 runtime = MimRuntime(store, index, cert_index, SNAPSHOT_DIR, embedding_provider=embed_provider)
 
 def restore_all():
@@ -53,6 +90,17 @@ def restore_all():
                         mem.embedding.set(data["embedding"]["value"],
                                           data["embedding"].get("clock", 0),
                                           data["embedding"].get("node_id", "local"))
+
+                    if "importance" in data:
+                        imp_data = data["importance"]
+                        mem.importance.set(imp_data["value"], imp_data.get("clock", 0), imp_data.get("node_id", "local"))
+
+                    if "last_accessed" in data:
+                        acc_data = data["last_accessed"]
+                        mem.last_accessed.set(acc_data["value"], acc_data.get("clock", 0), acc_data.get("node_id", "local"))
+
+                    if "links" in data:
+                        mem.links.from_dict(data["links"])
 
                     runtime.recover_actor(mem)
                     mems[mid] = mem

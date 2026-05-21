@@ -1,9 +1,9 @@
 import uuid
-import time
-import math
 from crdt.orset import ORSet
 from crdt.lww import LWWRegister
 
+from crdt.orset import ORSet
+from crdt.lww import LWWRegister
 from runtime.clocks import Dot
 
 class MemoryActor:
@@ -14,10 +14,6 @@ class MemoryActor:
         self.memory_type = LWWRegister(memory_type)
         self.tags = ORSet(tags or [])
         self.status = LWWRegister("active")
-        self.embedding = LWWRegister([]) # 存储向量
-        self.importance = LWWRegister(1.0) # 初始重要性
-        self.last_accessed = LWWRegister(time.time()) # 最后访问时间
-        self.links = ORSet([]) # 图谱边: (to_id, rel_type, weight)
 
         # _meta 现在包含版本向量版本
         default_meta = {
@@ -34,14 +30,7 @@ class MemoryActor:
         self.delete_certificate = kwargs.get("delete_certificate", None)
 
     def apply(self, message, context):
-        """处理消息并更新内部 CRDT 状态 (Data-Plane)"""
-        # 0. 强制前置检查: 如果本地已有删除证书且覆盖该 Actor，拒绝任何更新
-        # 注意: 这需要 Runtime 层协作，这里主要处理数据合并
-        if self._deleted:
-            # 如果已经标记删除，除非是特定的复活逻辑（目前不支持），否则不接受普通更新
-            if message.type != "delete":
-                return
-
+        """处理消息并更新内部 CRDT 状态"""
         mtype = message.type
         payload = message.payload
         clock = message.clock
@@ -59,16 +48,6 @@ class MemoryActor:
             self.tags.remove(payload["tag"], dot)
         elif mtype == "set_status":
             self.status.set(payload["status"], clock, node_id)
-        elif mtype == "update_embedding":
-            self.embedding.set(payload["embedding"], clock, node_id)
-        elif mtype == "update_importance":
-            self.importance.set(payload["importance"], clock, node_id)
-        elif mtype == "touch":
-            self.last_accessed.set(payload.get("timestamp", time.time()), clock, node_id)
-        elif mtype == "add_link":
-            self.links.add((payload["to_id"], payload["type"], payload.get("weight", 1.0)), dot)
-        elif mtype == "remove_link":
-            self.links.remove((payload["to_id"], payload["type"], payload.get("weight", 1.0)), dot)
         elif mtype == "delete":
             self._deleted = True
             self.delete_certificate = payload.get("certificate")
@@ -79,17 +58,6 @@ class MemoryActor:
         # 更新版本向量 (Version Vector)
         vv = self._meta["version_vector"]
         vv[node_id] = max(vv.get(node_id, 0), clock)
-
-    def calculate_current_importance(self, current_time=None, k=0.0001):
-        """计算当前衰减后的重要性: S = S0 * e^(-k * delta_t)"""
-        if current_time is None:
-            current_time = time.time()
-
-        t0 = self.last_accessed.value
-        s0 = self.importance.value
-        dt = max(0, current_time - t0)
-
-        return s0 * math.exp(-k * dt)
 
     def merge_state(self, remote_dict, cert_index=None):
         """合并远程状态到本地，包含复活防御逻辑"""
@@ -118,14 +86,6 @@ class MemoryActor:
             self.tags.merge(remote_dict["tags"])
         if "status" in remote_dict:
             self.status.merge(remote_dict["status"])
-        if "embedding" in remote_dict:
-            self.embedding.merge(remote_dict["embedding"])
-        if "importance" in remote_dict:
-            self.importance.merge(remote_dict["importance"])
-        if "last_accessed" in remote_dict:
-            self.last_accessed.merge(remote_dict["last_accessed"])
-        if "links" in remote_dict:
-            self.links.merge(remote_dict["links"])
 
         # 4. 合并元数据
         remote_meta = remote_dict.get("_meta", {})
@@ -145,10 +105,6 @@ class MemoryActor:
             "memory_type": self.memory_type.to_dict(),
             "tags": self.tags.to_dict(),
             "status": self.status.to_dict(),
-            "embedding": self.embedding.to_dict(),
-            "importance": self.importance.to_dict(),
-            "last_accessed": self.last_accessed.to_dict(),
-            "links": self.links.to_dict(),
             "_meta": self._meta,
             "_deleted": self._deleted,
             "delete_certificate": self.delete_certificate
@@ -159,22 +115,18 @@ class IndexActor:
         self.owner_index = {}    # user -> [memory_ids]
         self.tag_index = {}      # tag -> [memory_ids]
         self.type_index = {}     # type -> [memory_ids]
-        self.vector_store = {}   # memory_id -> vector (list)
 
     def add_memory(self, mem):
         self.owner_index.setdefault(mem.owner_id, set()).add(mem.id)
         for tag in mem.tags.elements():
             self.tag_index.setdefault(tag, set()).add(mem.id)
         self.type_index.setdefault(mem.memory_type.value, set()).add(mem.id)
-        if hasattr(mem, "embedding") and mem.embedding.value:
-            self.vector_store[mem.id] = mem.embedding.value
 
     def remove_memory(self, mem):
         self.owner_index.get(mem.owner_id, set()).discard(mem.id)
         for tag in mem.tags.elements():
             self.tag_index.get(tag, set()).discard(mem.id)
         self.type_index.get(mem.memory_type.value, set()).discard(mem.id)
-        self.vector_store.pop(mem.id, None)
 
     def query(self, owner=None, tag=None, type_=None):
         results = None
@@ -187,28 +139,3 @@ class IndexActor:
             type_results = self.type_index.get(type_, set()).copy()
             results = type_results if results is None else results & type_results
         return list(results) if results is not None else []
-
-    def hybrid_query(self, owner=None, tag=None, query_text=None, provider=None, top_k=5):
-        from runtime.embeddings import cosine_similarity
-        # 1. 硬约束过滤
-        candidates = self.query(owner=owner, tag=tag)
-        if not candidates:
-            return []
-
-        if not query_text or not provider:
-            return [(cid, 1.0) for cid in candidates[:top_k]]
-
-        # 2. 软约束排序
-        query_vec = provider.get_embedding(query_text)
-        scores = []
-        for cid in candidates:
-            vec = self.vector_store.get(cid)
-            if vec:
-                sim = cosine_similarity(query_vec, vec)
-                scores.append((cid, sim))
-            else:
-                scores.append((cid, 0.0))
-
-        # 按相似度排序
-        scores.sort(key=lambda x: x[1], reverse=True)
-        return scores[:top_k]
