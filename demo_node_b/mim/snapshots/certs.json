@@ -1,9 +1,0 @@
-{
-  "mem_1779349027386": {
-    "scope": "mem_1779349027386",
-    "delete_clock": {
-      "local": 1
-    },
-    "policy": "delete_wins"
-  }
-}
