@@ -2,6 +2,14 @@
 
 MIM 是一个面向 Agent Memory 的 Actor-based、CRDT-aware、local-first Memory Runtime。它旨在为 AI Agents 提供轻量级、高并发且支持分布式一致性的持久化记忆方案。
 
+## 文档指南 (Documentation)
+
+关于 MIM 的深度设计与详细用法，请参考 `docs/` 目录下的文档：
+
+- [架构设计 (Architecture)](docs/architecture.md): 深入了解 Actor-CRDT 模型、P2P 机制与多层缓存。
+- [API 规范 (API Specification)](docs/api_spec.md): 详细的 REST API 接口定义。
+- [开发手册 (Development Guide)](docs/development.md): 记录 E2E 测试、调试工具使用及提取策略扩展。
+
 ## 核心特性
 
 1.  **Actor-based**: 每一条记忆都是一个自治的 Actor，拥有独立的状态和 lifecycle。
