@@ -91,6 +91,19 @@ async def handle_list_tools() -> list[types.Tool]:
                 "required": ["user_id", "query"],
             },
         ),
+        types.Tool(
+            name="auto_context",
+            description="Automatically recall relevant MIM context for Claude Code sessions. Use this at the beginning of a task to get relevant historical background.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "user_id": {"type": "string", "description": "The unique ID of the user"},
+                    "query": {"type": "string", "description": "The current task or query context"},
+                    "limit": {"type": "integer", "description": "Maximum number of insights to return", "default": 8},
+                },
+                "required": ["user_id", "query"],
+            },
+        ),
     ]
 
 @server.call_tool()
@@ -181,6 +194,37 @@ async def handle_call_tool(
             return [types.TextContent(type="text", text="No associated memories found via graph search.")]
 
         return [types.TextContent(type="text", text=f"Found {len(output)} associated memories via spreading activation:\n" + "\n".join(output))]
+
+    elif name == "auto_context":
+        user_id = arguments["user_id"]
+        query = arguments["query"]
+        limit = arguments.get("limit", 8)
+
+        # 1. 执行深度图查询
+        results = runtime.graph_query(user_id, query, max_hops=3)
+        top_results = results[:limit]
+
+        if not top_results:
+            return [types.TextContent(type="text", text="No relevant background context found in MIM.")]
+
+        # 2. 构建格式化上下文块
+        context_lines = [
+            f"[MIM Auto Context]",
+            f"User: {user_id}",
+            f"Query context: {query}",
+            "",
+            "Relevant historical memories retrieved from knowledge graph:"
+        ]
+
+        for i, res in enumerate(top_results, 1):
+            context_lines.append(f"{i}. {res['content']} (Relevance: {res['score']:.2f})")
+
+        context_lines.append("")
+        context_lines.append("Use these memories to inform your current responses and maintain continuity.")
+
+        full_context = "\n".join(context_lines)
+
+        return [types.TextContent(type="text", text=full_context)]
 
     else:
         return [types.TextContent(type="text", text=f"Unknown tool: {name}")]

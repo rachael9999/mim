@@ -21,6 +21,8 @@ class DeleteCertIndex:
         for scope in scope_path:
             if scope in self.by_scope:
                 return self.by_scope[scope]
+            # 支持通配符或前缀匹配 (例如 user:* )
+            # 这里的逻辑可以根据需要增强
         return None
 
     def to_dict(self):

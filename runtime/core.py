@@ -9,7 +9,13 @@ from runtime.runtime import MimRuntime
 from runtime.embeddings import OllamaEmbeddingProvider
 from runtime.llm_extractor import GemmaExtractor
 
-SNAPSHOT_DIR = "mim/snapshots"
+# 自动定位项目根目录下的 snapshots 文件夹
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+SNAPSHOT_DIR = os.getenv("SNAPSHOT_DIR", os.path.join(BASE_DIR, "snapshots"))
+
+if not os.path.exists(SNAPSHOT_DIR):
+    os.makedirs(SNAPSHOT_DIR, exist_ok=True)
+
 NODE_ID_FILE = os.path.join(SNAPSHOT_DIR, "node_id")
 
 def get_node_id():

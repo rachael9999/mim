@@ -15,18 +15,17 @@ venv/
 pip-log.txt
 pip-delete-this-directory.txt
 
-# Zero & MIM Internal
-.zero/
-mim/snapshots/
-mim/test_knowledge_base/
-demo_node_a/mim/snapshots/
-demo_node_b/mim/snapshots/
-oplogs/
-*.log
-
-# Snapshots & OS
+# Snapshots & Data (Local First)
+snapshots/
+.mim_cache/
+tests/data/
+processed_messages.json
+node_id
 *.json
 !examples/*.json
 !demo_dialogue.json
-.DS_Store
-Thumbs.db
+!package.json
+!tsconfig.json
+
+# HTML visualization exports
+mim_graph_*.html

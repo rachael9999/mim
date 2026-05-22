@@ -160,8 +160,10 @@ class IndexActor:
         self.tag_index = {}      # tag -> [memory_ids]
         self.type_index = {}     # type -> [memory_ids]
         self.vector_store = {}   # memory_id -> vector (list)
+        self.version = 0         # 图谱版本号 (P19)
 
     def add_memory(self, mem):
+        self.version += 1
         self.owner_index.setdefault(mem.owner_id, set()).add(mem.id)
         for tag in mem.tags.elements():
             self.tag_index.setdefault(tag, set()).add(mem.id)
@@ -170,6 +172,7 @@ class IndexActor:
             self.vector_store[mem.id] = mem.embedding.value
 
     def remove_memory(self, mem):
+        self.version += 1
         self.owner_index.get(mem.owner_id, set()).discard(mem.id)
         for tag in mem.tags.elements():
             self.tag_index.get(tag, set()).discard(mem.id)

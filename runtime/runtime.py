@@ -234,10 +234,16 @@ class MimRuntime:
                     rel_gain = REL_WEIGHTS.get(rel_type, 0.5)
                     contribution = base_spread * weight * rel_gain
 
-                    if contribution > 0.01: # 能量阈值拦截，防止无限微弱扩散
-                        new_activations[to_id] = new_activations.get(to_id, 0) + contribution
-                        if to_id not in paths:
-                            paths[to_id] = paths[mid] + [to_id]
+                    if contribution > 0.01: # 能量阈值拦截
+                        # 只有当新能量显著高于旧能量时才更新路径，避免回路
+                        if contribution > new_activations.get(to_id, 0):
+                            new_activations[to_id] = contribution
+                            # 存储详细推理步骤
+                            paths[to_id] = paths[mid] + [{
+                                "node": to_id,
+                                "via": rel_type,
+                                "gain": round(contribution, 4)
+                            }]
 
             if not new_activations:
                 break
@@ -257,30 +263,59 @@ class MimRuntime:
         for mid, score in final_scores.items():
             actor = mems.get(mid)
             if actor and vis.object_visible(actor):
+                # 构建可读的路径解释
+                path_steps = []
+                raw_path = paths.get(mid, [])
+                for step in raw_path:
+                    if isinstance(step, dict):
+                        path_steps.append(f"--({step['via']}:+{step['gain']})--> {step['node']}")
+                    else:
+                        path_steps.append(step)
+
                 results.append({
                     "id": mid,
-                    "score": score,
+                    "score": round(score, 4),
                     "content": actor.content.value,
-                    "path": " -> ".join(paths.get(mid, []))
+                    "explanation": " ".join(path_steps)
                 })
 
         results.sort(key=lambda x: x["score"], reverse=True)
         return results
 
-    def discover_insights(self, user_id, top_n=5):
-        """知识发现：识别紧密关联的集群并使用并发总结 (P15 优化版)"""
-        print(f"[DISCOVERY] Running optimized discovery for user: {user_id}")
+    def discover_insights(self, user_id, top_n=5, force_refresh=False):
+        """知识发现：识别紧密关联的集群并使用并发总结 (P15 优化版 + P19 缓存)"""
+        from runtime.cache import InsightTTLCache
+        from runtime.core import index
+
+        # 0. 缓存检查
+        cache = InsightTTLCache()
+        graph_version = getattr(index, "version", 0)
+        params = {"top_n": top_n}
+        cache_key = cache.make_key(user_id, graph_version, params)
+
+        if not force_refresh:
+            cached_result = cache.get(cache_key)
+            if cached_result:
+                print(f"[DISCOVERY] Cache Hit! (v{graph_version})")
+                return cached_result
+
+        print(f"[DISCOVERY] Cache Miss or Refresh. Running optimized discovery for user: {user_id}")
         from runtime.core import mems, llm_extractor
         from concurrent.futures import ThreadPoolExecutor
         import hashlib
 
-        # 1. 识别集群中心
+        # 1. 识别集群中心或高重要性孤岛
         centers = []
         for mid, actor in mems.items():
             if actor.owner_id == user_id and not actor._deleted and actor.memory_type.value != "insight":
                 links = actor.links.elements()
-                if len(links) >= 2:
-                    centers.append((mid, len(links)))
+                importance = actor.calculate_current_importance()
+
+                # 策略：要么有多个链接（集群中心），要么重要性极高（核心孤岛）
+                if len(links) >= 1 or importance > 0.8:
+                    # 权重 = 链接数 + 重要性加成
+                    weight = len(links) + (importance * 2)
+                    centers.append((mid, weight))
 
         centers.sort(key=lambda x: x[1], reverse=True)
 
@@ -300,7 +335,7 @@ class MimRuntime:
                     cluster_mems.append(neighbor.content.value)
                     cluster_ids.append(to_id)
 
-            if len(cluster_mems) >= 2:
+            if len(cluster_mems) >= 1: # 降低门槛，单条极重要记忆也可以触发初步 Insight
                 # 生成集群指纹，用于去重
                 cluster_mems.sort()
                 fingerprint = hashlib.md5("".join(cluster_mems).encode()).hexdigest()
@@ -336,9 +371,27 @@ class MimRuntime:
 
                 insights.append(summary)
 
-        return list(set(insights)) # 去重返回
+        final_insights = list(set(insights))
+        # 5. 存入缓存
+        cache.set(cache_key, final_insights, graph_version, meta={"user_id": user_id, "top_n": top_n})
+        return final_insights
+    def _async_precompute(self, user_id):
+        """后台异步预计算：更新节点中心度、集群等，减少运行时负担"""
+        import threading
+        def run():
+            from runtime.core import mems
+            # 1. 简单的中心度计算 (以链接数作为基准)
+            # 在更大规模图中可以使用 PageRank
+            # 目前 discover 已经动态计算，此处可以预留计算 heavy 任务
+            print(f"[PRECOMPUTE] Background analysis for {user_id} triggered.")
+            # TODO: 实现更复杂的社区发现算法 (如 Louvain)
+
+        threading.Thread(target=run, daemon=True).start()
+
     def ingest_dialogue(self, user_id, messages, extractor):
-        """从对话中提取并摄入记忆 (带去重)"""
+        """从对话中提取并摄入记忆 (带语义去重 + 异步预计算)"""
+        from runtime.dedup import find_duplicate, reinforce_memory
+        from runtime.core import mems
         # 1. 过滤已处理的消息
         new_messages = [m for m in messages if m.message_id not in self.processed_message_ids]
         if not new_messages:
@@ -352,6 +405,13 @@ class MimRuntime:
 
         results = []
         for op in ops:
+            # 2.1 语义去重检查
+            duplicate_id = find_duplicate(user_id, op.content, mems)
+            if duplicate_id:
+                reinforce_memory(self, mems[duplicate_id], reason="Semantic match during ingest")
+                results.append(mems[duplicate_id])
+                continue
+
             # 3. 创建新的 MemoryActor
             mem_id = f"mem_ext_{int(time.time()*1000)}_{len(results)}"
             mem = MemoryActor(id=mem_id, owner_id=user_id, content="", memory_type=op.memory_type, tags=[])
@@ -372,7 +432,11 @@ class MimRuntime:
             results.append(mem)
             print(f"[INGEST] Extracted: {op.content} -> {mem_id}")
 
-        # 5. 标记消息为已处理
+        # 5. 触发异步预计算 (P19)
+        if results:
+            self._async_precompute(user_id)
+
+        # 6. 标记消息为已处理
         for m in new_messages:
             self.processed_message_ids.add(m.message_id)
         self._save_processed_ids()

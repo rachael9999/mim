@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MIM Runtime Debugger</title>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; background-color: #f4f7f6; color: #333; margin: 0; padding: 20px; }
+        .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; border-bottom: 2px solid #ddd; padding-bottom: 10px; }
+        .status-tag { padding: 4px 8px; border-radius: 4px; font-weight: bold; font-size: 12px; }
+        .status-ok { background-color: #d4edda; color: #155724; }
+        .status-error { background-color: #f8d7da; color: #721c24; }
+
+        .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px; }
+        .card { background: white; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); padding: 15px; }
+        .card h2 { margin-top: 0; font-size: 18px; border-bottom: 1px solid #eee; padding-bottom: 8px; color: #2c3e50; }
+
+        table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 14px; }
+        th, td { text-align: left; padding: 8px; border-bottom: 1px solid #eee; }
+        th { background-color: #f8f9fa; color: #666; }
+
+        .metric-value { font-size: 24px; font-weight: bold; color: #3498db; }
+        .metric-label { font-size: 12px; color: #7f8c8d; text-transform: uppercase; }
+
+        .vector-tag { display: inline-block; padding: 2px 6px; background: #eef2f7; border-radius: 3px; font-family: monospace; font-size: 12px; margin-right: 4px; }
+        .highlight { color: #e67e22; font-weight: bold; }
+        .refresh-notice { font-size: 12px; color: #95a5a6; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>MIM Runtime Debugger <span id="node-id-display" style="font-size: 14px; color: #7f8c8d; font-weight: normal;"></span></h1>
+        <div>
+            <span id="api-status" class="status-tag status-ok">CONNECTED</span>
+            <span class="refresh-notice">Auto-refreshes every 2s</span>
+        </div>
+    </div>
+
+    <div class="grid">
+        <!-- Health Card -->
+        <div class="card">
+            <h2>System Metrics</h2>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+                <div>
+                    <div id="mems-loaded" class="metric-value">0</div>
+                    <div class="metric-label">Memories</div>
+                </div>
+                <div>
+                    <div id="certs-loaded" class="metric-value">0</div>
+                    <div class="metric-label">Certificates</div>
+                </div>
+                <div>
+                    <div id="uptime" class="metric-value">0s</div>
+                    <div class="metric-label">Uptime</div>
+                </div>
+                <div>
+                    <div id="conflicts" class="metric-value">0</div>
+                    <div class="metric-label">Conflicts</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Peers Card -->
+        <div class="card">
+            <h2>Active Peers</h2>
+            <table id="peers-table">
+                <thead><tr><th>Node URL</th><th>Status</th></tr></thead>
+                <tbody></tbody>
+            </table>
+        </div>
+
+        <!-- Version Vectors -->
+        <div class="card" style="grid-column: span 2;">
+            <h2>Recent Actors (Version Vectors)</h2>
+            <table id="actors-table">
+                <thead>
+                    <tr>
+                        <th>Actor ID</th>
+                        <th>Type</th>
+                        <th>Clock</th>
+                        <th>Version Vector</th>
+                        <th>Status</th>
+                    </tr>
+                </thead>
+                <tbody></tbody>
+            </table>
+        </div>
+
+        <!-- Certificates -->
+        <div class="card">
+            <h2>Delete Certificates</h2>
+            <table id="certs-table">
+                <thead><tr><th>Scope</th><th>Policy</th><th>Time</th></tr></thead>
+                <tbody></tbody>
+            </table>
+        </div>
+    </div>
+
+    <script>
+        async function updateDashboard() {
+            try {
+                const [stateRes, metricsRes] = await Promise.all([
+                    fetch('/v1/debug/runtime_state'),
+                    fetch('/metrics')
+                ]);
+
+                if (!stateRes.ok || !metricsRes.ok) throw new Error('API Error');
+
+                const state = await stateRes.json();
+                const metrics = await metricsRes.json();
+
+                // Update Display
+                document.getElementById('api-status').className = 'status-tag status-ok';
+                document.getElementById('api-status').textContent = 'CONNECTED';
+                document.getElementById('node-id-display').textContent = `Node: ${state.node_id}`;
+
+                // Update Metrics
+                document.getElementById('mems-loaded').textContent = metrics.mems_loaded;
+                document.getElementById('certs-loaded').textContent = metrics.certs_loaded;
+                document.getElementById('uptime').textContent = Math.floor(metrics.uptime) + 's';
+                document.getElementById('conflicts').textContent = metrics.conflicts_detected || 0;
+
+                // Update Peers
+                const peerBody = document.querySelector('#peers-table tbody');
+                peerBody.innerHTML = state.peers.map(p => `<tr><td>${p}</td><td><span class="status-tag status-ok">ACTIVE</span></td></tr>`).join('') || '<tr><td colspan="2">No peers registered</td></tr>';
+
+                // Update Actors
+                const actorBody = document.querySelector('#actors-table tbody');
+                actorBody.innerHTML = Object.entries(state.actors).slice(0, 10).map(([id, info]) => {
+                    const vvStr = Object.entries(info.vv).map(([nid, c]) => `<span class="vector-tag">${nid}:${c}</span>`).join('');
+                    const statusClass = info.deleted ? 'status-error' : 'status-ok';
+                    const statusText = info.deleted ? 'DELETED' : 'ACTIVE';
+                    return `
+                        <tr>
+                            <td><code>${id}</code></td>
+                            <td>${info.type}</td>
+                            <td>${info.clock}</td>
+                            <td>${vvStr}</td>
+                            <td><span class="status-tag ${statusClass}">${statusText}</span></td>
+                        </tr>
+                    `;
+                }).join('') || '<tr><td colspan="5">No actors in memory</td></tr>';
+
+                // Update Certs
+                const certBody = document.querySelector('#certs-table tbody');
+                certBody.innerHTML = Object.entries(state.certificates).map(([scope, c]) => `
+                    <tr>
+                        <td><code>${scope}</code></td>
+                        <td>${c.policy}</td>
+                        <td>${new Date(c.timestamp * 1000).toLocaleTimeString()}</td>
+                    </tr>
+                `).join('') || '<tr><td colspan="3">No certificates</td></tr>';
+
+            } catch (err) {
+                console.error(err);
+                document.getElementById('api-status').className = 'status-tag status-error';
+                document.getElementById('api-status').textContent = 'DISCONNECTED';
+            }
+        }
+
+        setInterval(updateDashboard, 2000);
+        updateDashboard();
+    </script>
+</body>
+</html>

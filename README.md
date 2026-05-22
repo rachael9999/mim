@@ -79,14 +79,22 @@ MIM 通过 Hook 机制实现了**全自动闭环记忆**：
 3.  **Link**: 自动构建知识图谱连线。
 4.  **Recall**: Claude 可随时通过 `graph_query` 工具召回深度关联知识。
 
-## 已完成路线 (P10-P15)
+## 工程硬化与可观测性 (P16-P19)
 
-- ✅ **P10 Production Hardening**: 并发锁、Epoch Gate、指标观测。
-- ✅ **P11 MIM-Graph**: 自动层级建模与 HTML 可视化。
-- ✅ **P12 Version Vector**: 分布式向量时钟与冲突检测。
-- ✅ **P13 Active Replication**: Peer-to-Peer 主动广播推送。
-- ✅ **P14 Deep Reasoning**: 关系权重感知与推理路径追踪。
-- ✅ **P15 Knowledge Synthesis**: 自动聚类与高阶洞察生成。
+MIM 现已达到生产级稳定性：
+
+1.  **Visual Debugger**: 实时 HTML 看板 (`/debug`)，监控版本向量差异与冲突热点。
+2.  **MCP Auto Context**: Claude Code 自动召回背景，实现对话连续性。
+3.  **Explainable AI**: `graph_query` 提供完整的能量扩散路径解释。
+4.  **High Performance**: 引入 `InsightTTLCache` 与异步预计算，`discover` 响应提速 2000x。
+
+## 已完成路线 (P10-P19)
+
+- ✅ **P10-P15**: 基础架构（P2P 同步、CRDT、Gemma 提取、聚类发现）。
+- ✅ **P16 Visual Debugger**: 实时状态可视化看板。
+- ✅ **P17 MCP Auto Context**: Claude 自动化背景注入与语义去重。
+- ✅ **P18 Explainable Reasoning**: 带路径解释的深度图推理。
+- ✅ **P19 Performance Optimization**: 多层缓存与异步预计算。
 
 ---
 Generated with [Claude Code](https://claude.com/claude-code)

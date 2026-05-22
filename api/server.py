@@ -1,11 +1,17 @@
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, HTMLResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
-from typing import List, Optional, Dict
+from typing import List, Optional, Dict, Any
 import threading
 import time
+import os
 
 START_TIME = time.time()
+
+# 从环境变量中读取 SNAPSHOT_DIR，以便在测试中隔离
+SNAPSHOT_DIR = os.getenv("SNAPSHOT_DIR", "mim/snapshots")
+os.environ["SNAPSHOT_DIR"] = SNAPSHOT_DIR # 传递给 runtime.core
 
 from runtime.core import mems, index, cert_index, scope_graph, store, index_store, embed_provider, runtime, restore_all, save_certs, NODE_ID
 from runtime.actor import MemoryActor
@@ -13,7 +19,11 @@ from runtime.visibility import VisibilityResolver
 from runtime.extractor import DialogueMessage, MockExtractor
 
 app = FastAPI(title="MIM HTTP API", version="0.1.0")
-mim_lock = threading.Lock()
+app.mount("/static", StaticFiles(directory="static"), name="static")
+# --- Concurrency Control (P19) ---
+# 使用 RLock 允许重入，并为后续读写分离预留结构
+mim_lock = threading.RLock()
+
 
 # --- Metrics Store (Production Hardening) ---
 METRICS = {
@@ -100,11 +110,12 @@ def api_pull(req: PullRequest):
             if actor.owner_id != req.user_id:
                 continue
 
+            # Visibility Check (P12-P13 增强：支持证书过滤)
             if not vis.object_visible(actor):
                 continue
 
             # 对比版本向量
-            actor_vv = VersionVector(actor._meta.get("version_vector", {}))
+            actor_vv = VersionVector(actor._meta.get("version_vector", {NODE_ID: actor._meta.get("clock", 0)}))
             if not client_vv.dominates(actor_vv):
                 # 客户端没有包含该 Actor 的最新状态
                 updates.append(actor.to_dict())
@@ -122,6 +133,12 @@ def api_sync_single(remote_data: Dict[str, Any]):
     with mim_lock:
         mid = remote_data["id"]
         if mid in mems:
+            # 冲突检测与指标记录
+            remote_meta = remote_data.get("_meta", {})
+            local_meta = mems[mid]._meta
+            if remote_meta.get("clock", 0) < local_meta.get("clock", 0):
+                METRICS["conflicts_detected"] += 1
+
             mems[mid].merge_state(remote_data, cert_index)
         else:
             mems[mid] = MemoryActor(id=mid, owner_id=remote_data["owner_id"], content="", memory_type=remote_data["memory_type"]["value"], tags=[])
@@ -141,10 +158,24 @@ def api_add_peer(req: Dict[str, str]):
     peers = add_peer(url)
     return {"peers": peers}
 
+@app.post("/v1/sync_certs")
+def api_sync_certs(certs: Dict[str, Any]):
+    """接收并合并删除证书"""
+    with mim_lock:
+        for scope, cert in certs.items():
+            cert_index.add(cert)
+        save_certs()
+        return {"status": "certs_merged", "count": len(certs)}
+
 @app.on_event("startup")
 def startup_event():
     with mim_lock:
         restore_all()
+
+@app.get("/debug", response_class=HTMLResponse)
+def get_dashboard():
+    with open("static/debug_dashboard.html", "r", encoding="utf-8") as f:
+        return f.read()
 
 @app.get("/health")
 def health_check():
@@ -243,6 +274,16 @@ def api_ingest(req: IngestRequest):
         except Exception as e:
             raise MIMException(status_code=500, detail=str(e), code="INGEST_ERROR")
 
+@app.post("/v1/discover")
+def api_discover(user_id: str, top_n: int = 5, force_refresh: bool = False):
+    """知识发现接口 (支持缓存与异步并发)"""
+    # 注意：discover_insights 内部已经处理了缓存逻辑
+    try:
+        insights = runtime.discover_insights(user_id, top_n=top_n, force_refresh=force_refresh)
+        return {"insights": insights}
+    except Exception as e:
+        raise MIMException(status_code=500, detail=str(e), code="DISCOVERY_ERROR")
+
 @app.get("/metrics")
 def get_metrics():
     with mim_lock:
@@ -250,8 +291,38 @@ def get_metrics():
             **METRICS,
             "mems_loaded": len(mems),
             "certs_loaded": len(cert_index.by_scope),
-            "uptime": time.time() - START_TIME
+            "uptime": time.time() - START_TIME,
+            "node_id": NODE_ID,
+            "memory_usage_mb": len(str(mems)) / 1024 / 1024 # 粗略估计
         }
+
+@app.get("/v1/debug/runtime_state")
+def get_runtime_state():
+    """生产环境调试接口：导出当前节点所有 Actor 的状态摘要"""
+    with mim_lock:
+        from runtime.cache import InsightTTLCache
+        cache = InsightTTLCache()
+
+        state = {
+            "node_id": NODE_ID,
+            "actors": {},
+            "certificates": cert_index.to_dict(),
+            "peers": [],
+            "cache_stats": cache.stats()
+        }
+
+        from runtime.core import get_peers
+        state["peers"] = get_peers()
+
+        for mid, actor in mems.items():
+            state["actors"][mid] = {
+                "clock": actor._meta.get("clock", 0),
+                "vv": actor._meta.get("version_vector", {}),
+                "deleted": actor._deleted,
+                "type": actor.memory_type.value,
+                "content_preview": actor.content.value[:50] + "..." if len(actor.content.value) > 50 else actor.content.value
+            }
+        return state
 
 @app.post("/v1/sync")
 def api_sync(req: SyncRequest):

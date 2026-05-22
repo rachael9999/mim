@@ -114,7 +114,8 @@ def graph_query(user, query_text):
     results = runtime.graph_query(user, query_text)
     print(f"\n[GRAPH RESULTS] Found {len(results)} associated nodes:")
     for res in results:
-        print(f"  [{res['score']:.4f}] {res['id']}: {res['content']} (Path: {res['path']})")
+        print(f"  [{res['score']:.4f}] {res['id']}: {res['content']}")
+        print(f"    Reason: {res['explanation']}")
 
 def ingest_folder(user, path):
     from runtime.extractor import FolderCrawler
